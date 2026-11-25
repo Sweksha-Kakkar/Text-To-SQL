@@ -1,0 +1,86 @@
+[
+  {
+    "question": "How many orders were placed in each month of 2025?",
+    "sql": "SELECT date_trunc('month', o.order_date)::date AS month, COUNT(*) AS orders\nFROM orders o\nWHERE o.order_date >= DATE '2025-01-01' AND o.order_date < DATE '2026-01-01'\nGROUP BY 1\nORDER BY 1;"
+  },
+  {
+    "question": "What is the total revenue for each top-level category?",
+    "sql": "SELECT top.name AS category,\n       ROUND(SUM(oi.quantity * oi.unit_price * (1 - oi.discount_pct / 100.0)), 2) AS revenue\nFROM order_items oi\nJOIN orders o       ON o.order_id = oi.order_id\nJOIN products p     ON p.product_id = oi.product_id\nJOIN categories sub ON sub.category_id = p.category_id\nJOIN categories top ON top.category_id = sub.parent_category_id\nWHERE o.status NOT IN ('cancelled', 'returned')\nGROUP BY top.name\nORDER BY revenue DESC;"
+  },
+  {
+    "question": "Who are the 10 customers that spent the most?",
+    "sql": "SELECT c.customer_id, c.first_name || ' ' || c.last_name AS customer, c.country,\n       ROUND(SUM(oi.quantity * oi.unit_price * (1 - oi.discount_pct / 100.0)), 2) AS total_spent\nFROM customers c\nJOIN orders o       ON o.customer_id = c.customer_id\nJOIN order_items oi ON oi.order_id = o.order_id\nWHERE o.status NOT IN ('cancelled', 'returned')\nGROUP BY c.customer_id\nORDER BY total_spent DESC\nLIMIT 10;"
+  },
+  {
+    "question": "Which products are below their reorder level in the Mumbai Central DC warehouse?",
+    "sql": "SELECT p.name AS product, i.quantity_on_hand, i.reorder_level\nFROM inventory i\nJOIN warehouses w ON w.warehouse_id = i.warehouse_id\nJOIN products p   ON p.product_id = i.product_id\nWHERE w.name = 'Mumbai Central DC' AND i.quantity_on_hand < i.reorder_level\nORDER BY i.quantity_on_hand;"
+  },
+  {
+    "question": "What is the average delivery time in days for each customer country?",
+    "sql": "SELECT c.country, ROUND(AVG(o.delivered_date - o.order_date::date), 1) AS avg_delivery_days\nFROM orders o\nJOIN customers c ON c.customer_id = o.customer_id\nWHERE o.delivered_date IS NOT NULL\nGROUP BY c.country\nORDER BY avg_delivery_days;"
+  },
+  {
+    "question": "Who reports directly to the Head of Sales?",
+    "sql": "SELECT e.first_name || ' ' || e.last_name AS employee, e.job_title\nFROM employees e\nJOIN employees m ON m.employee_id = e.manager_id\nWHERE m.job_title = 'Head of Sales'\nORDER BY employee;"
+  },
+  {
+    "question": "What is the profit and margin percentage for each sub-category?",
+    "sql": "SELECT sub.name AS sub_category,\n       ROUND(SUM(oi.quantity * oi.unit_price * (1 - oi.discount_pct / 100.0) - oi.quantity * p.cost_price), 2) AS profit,\n       ROUND(100 * SUM(oi.quantity * oi.unit_price * (1 - oi.discount_pct / 100.0) - oi.quantity * p.cost_price)\n             / SUM(oi.quantity * oi.unit_price * (1 - oi.discount_pct / 100.0)), 1) AS margin_pct\nFROM order_items oi\nJOIN orders o       ON o.order_id = oi.order_id\nJOIN products p     ON p.product_id = oi.product_id\nJOIN categories sub ON sub.category_id = p.category_id\nWHERE o.status NOT IN ('cancelled', 'returned')\nGROUP BY sub.name\nORDER BY margin_pct DESC;"
+  },
+  {
+    "question": "Show total revenue for each fiscal year.",
+    "sql": "SELECT EXTRACT(YEAR FROM o.order_date + INTERVAL '9 months')::int AS fiscal_year,\n       ROUND(SUM(oi.quantity * oi.unit_price * (1 - oi.discount_pct / 100.0)), 2) AS revenue\nFROM orders o\nJOIN order_items oi ON oi.order_id = o.order_id\nWHERE o.status NOT IN ('cancelled', 'returned')\nGROUP BY 1\nORDER BY 1;"
+  },
+  {
+    "question": "Which customers who ordered before 2026 have not placed any order in 2026?",
+    "sql": "SELECT c.customer_id, c.first_name || ' ' || c.last_name AS customer, c.country\nFROM customers c\nWHERE EXISTS (SELECT 1 FROM orders o WHERE o.customer_id = c.customer_id AND o.order_date < DATE '2026-01-01')\n  AND NOT EXISTS (SELECT 1 FROM orders o WHERE o.customer_id = c.customer_id AND o.order_date >= DATE '2026-01-01')\nORDER BY c.customer_id;"
+  },
+  {
+    "question": "Show month-over-month revenue growth for 2025.",
+    "sql": "WITH monthly AS (\n    SELECT date_trunc('month', o.order_date)::date AS month,\n           SUM(oi.quantity * oi.unit_price * (1 - oi.discount_pct / 100.0)) AS revenue\n    FROM orders o\n    JOIN order_items oi ON oi.order_id = o.order_id\n    WHERE o.status NOT IN ('cancelled', 'returned')\n      AND o.order_date >= DATE '2025-01-01' AND o.order_date < DATE '2026-01-01'\n    GROUP BY 1\n)\nSELECT month, ROUND(revenue, 2) AS revenue,\n       ROUND(100 * (revenue - LAG(revenue) OVER (ORDER BY month)) / LAG(revenue) OVER (ORDER BY month), 1) AS growth_pct\nFROM monthly\nORDER BY month;"
+  },
+  {
+    "question": "What are the 5 best rated products?",
+    "sql": "SELECT p.name AS product, ROUND(AVG(r.rating), 2) AS avg_rating, COUNT(*) AS reviews\nFROM reviews r\nJOIN products p ON p.product_id = r.product_id\nGROUP BY p.product_id, p.name\nHAVING COUNT(*) >= 10\nORDER BY avg_rating DESC, reviews DESC\nLIMIT 5;"
+  },
+  {
+    "question": "How many active customers do we have right now?",
+    "sql": "SELECT COUNT(DISTINCT o.customer_id) AS active_customers\nFROM orders o\nWHERE o.status <> 'cancelled'\n  AND o.order_date >= CURRENT_DATE - INTERVAL '90 days';"
+  },
+  {
+    "question": "What share of orders from India were paid with UPI?",
+    "sql": "SELECT ROUND(100.0 * COUNT(*) FILTER (WHERE o.payment_method = 'upi') / COUNT(*), 1) AS upi_share_pct\nFROM orders o\nJOIN customers c ON c.customer_id = o.customer_id\nWHERE c.country = 'India';"
+  },
+  {
+    "question": "Rank the sales reps by the revenue of orders they handled in 2025.",
+    "sql": "SELECT e.first_name || ' ' || e.last_name AS sales_rep,\n       ROUND(SUM(oi.quantity * oi.unit_price * (1 - oi.discount_pct / 100.0)), 2) AS revenue,\n       RANK() OVER (ORDER BY SUM(oi.quantity * oi.unit_price * (1 - oi.discount_pct / 100.0)) DESC) AS rank\nFROM orders o\nJOIN employees e    ON e.employee_id = o.handled_by\nJOIN order_items oi ON oi.order_id = o.order_id\nWHERE o.status NOT IN ('cancelled', 'returned')\n  AND o.order_date >= DATE '2025-01-01' AND o.order_date < DATE '2026-01-01'\nGROUP BY e.employee_id, sales_rep\nORDER BY rank;"
+  },
+  {
+    "question": "Which suppliers provide the most active products?",
+    "sql": "SELECT s.name AS supplier, s.country, COUNT(*) AS active_products\nFROM suppliers s\nJOIN products p ON p.supplier_id = s.supplier_id\nWHERE p.is_active\nGROUP BY s.supplier_id\nORDER BY active_products DESC;"
+  },
+  {
+    "question": "List everyone in the organisation under the Head of Support, at any level.",
+    "sql": "WITH RECURSIVE team AS (\n    SELECT employee_id, first_name, last_name, job_title, 1 AS level\n    FROM employees\n    WHERE manager_id = (SELECT employee_id FROM employees WHERE job_title = 'Head of Support')\n    UNION ALL\n    SELECT e.employee_id, e.first_name, e.last_name, e.job_title, t.level + 1\n    FROM employees e\n    JOIN team t ON e.manager_id = t.employee_id\n)\nSELECT first_name || ' ' || last_name AS employee, job_title, level\nFROM team\nORDER BY level, employee;"
+  },
+  {
+    "question": "What is the average order value for each loyalty tier?",
+    "sql": "SELECT c.loyalty_tier,\n       ROUND(SUM(oi.quantity * oi.unit_price * (1 - oi.discount_pct / 100.0)) / COUNT(DISTINCT o.order_id), 2) AS avg_order_value\nFROM customers c\nJOIN orders o       ON o.customer_id = c.customer_id\nJOIN order_items oi ON oi.order_id = o.order_id\nWHERE o.status NOT IN ('cancelled', 'returned')\nGROUP BY c.loyalty_tier\nORDER BY avg_order_value DESC;"
+  },
+  {
+    "question": "What is the cancellation rate for each payment method?",
+    "sql": "SELECT o.payment_method,\n       COUNT(*) AS orders,\n       ROUND(100.0 * COUNT(*) FILTER (WHERE o.status = 'cancelled') / COUNT(*), 2) AS cancellation_rate_pct\nFROM orders o\nGROUP BY o.payment_method\nORDER BY cancellation_rate_pct DESC;"
+  },
+  {
+    "question": "How many orders did each warehouse ship last month?",
+    "sql": "SELECT w.name AS warehouse, COUNT(*) AS orders_shipped\nFROM orders o\nJOIN warehouses w ON w.warehouse_id = o.warehouse_id\nWHERE o.shipped_date >= date_trunc('month', CURRENT_DATE) - INTERVAL '1 month'\n  AND o.shipped_date <  date_trunc('month', CURRENT_DATE)\nGROUP BY w.name\nORDER BY orders_shipped DESC;"
+  },
+  {
+    "question": "Which customers signed up but never placed an order?",
+    "sql": "SELECT c.customer_id, c.first_name || ' ' || c.last_name AS customer, c.signup_date\nFROM customers c\nLEFT JOIN orders o ON o.customer_id = c.customer_id\nWHERE o.order_id IS NULL\nORDER BY c.signup_date;"
+  },
+  {
+    "question": "What are the 3 best-selling products by units in each top-level category?",
+    "sql": "WITH units AS (\n    SELECT top.name AS category, p.name AS product, SUM(oi.quantity) AS units_sold,\n           ROW_NUMBER() OVER (PARTITION BY top.name ORDER BY SUM(oi.quantity) DESC) AS rn\n    FROM order_items oi\n    JOIN orders o       ON o.order_id = oi.order_id\n    JOIN products p     ON p.product_id = oi.product_id\n    JOIN categories sub ON sub.category_id = p.category_id\n    JOIN categories top ON top.category_id = sub.parent_category_id\n    WHERE o.status NOT IN ('cancelled', 'returned')\n    GROUP BY top.name, p.name\n)\nSELECT category, product, units_sold\nFROM units\nWHERE rn <= 3\nORDER BY category, units_sold DESC;"
+  }
+]

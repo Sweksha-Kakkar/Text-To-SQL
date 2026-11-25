@@ -1,0 +1,92 @@
+[
+  {
+    "term": "Revenue / sales",
+    "definition": "Money earned from products sold. Computed from order_items as quantity * unit_price * (1 - discount_pct / 100). Excludes orders whose status is 'cancelled' or 'returned'. Shipping fees are NOT revenue.",
+    "sql": "SUM(oi.quantity * oi.unit_price * (1 - oi.discount_pct / 100.0)) ... FROM order_items oi JOIN orders o ON o.order_id = oi.order_id WHERE o.status NOT IN ('cancelled', 'returned')"
+  },
+  {
+    "term": "Profit / gross margin",
+    "definition": "Profit = revenue minus product cost, where cost = quantity * products.cost_price. Margin % = profit / revenue * 100. Same status exclusions as revenue.",
+    "sql": "SUM(oi.quantity * oi.unit_price * (1 - oi.discount_pct / 100.0) - oi.quantity * p.cost_price) AS profit"
+  },
+  {
+    "term": "Average order value (AOV)",
+    "definition": "Revenue divided by the number of distinct orders, using only orders that are not cancelled or returned.",
+    "sql": "SUM(line_revenue) / COUNT(DISTINCT o.order_id)"
+  },
+  {
+    "term": "Fiscal year (FY)",
+    "definition": "The company's fiscal year runs from 1 April to 31 March and is named after the year it ENDS in. FY2026 = 1 Apr 2025 to 31 Mar 2026. Fiscal quarters: Q1 Apr-Jun, Q2 Jul-Sep, Q3 Oct-Dec, Q4 Jan-Mar.",
+    "sql": "EXTRACT(YEAR FROM o.order_date + INTERVAL '9 months') AS fiscal_year"
+  },
+  {
+    "term": "Active customer",
+    "definition": "A customer who placed at least one order that was not cancelled in the last 90 days (relative to CURRENT_DATE).",
+    "sql": "o.status <> 'cancelled' AND o.order_date >= CURRENT_DATE - INTERVAL '90 days'"
+  },
+  {
+    "term": "Churned / lapsed customer",
+    "definition": "A customer who has ordered before but whose most recent order is more than 180 days ago.",
+    "sql": "HAVING MAX(o.order_date) < CURRENT_DATE - INTERVAL '180 days'"
+  },
+  {
+    "term": "Repeat customer",
+    "definition": "A customer with two or more orders that were not cancelled.",
+    "sql": "HAVING COUNT(*) FILTER (WHERE o.status <> 'cancelled') >= 2"
+  },
+  {
+    "term": "New customers",
+    "definition": "Customers counted by customers.signup_date falling in the period asked about (not by first order date).",
+    "sql": "WHERE c.signup_date >= ..."
+  },
+  {
+    "term": "Low stock / needs restocking",
+    "definition": "An inventory row where quantity_on_hand is below reorder_level. Out of stock means quantity_on_hand = 0. Stock is per warehouse; total stock of a product = SUM over warehouses.",
+    "sql": "WHERE i.quantity_on_hand < i.reorder_level"
+  },
+  {
+    "term": "Delivery time / shipping speed",
+    "definition": "Days between placing and receiving an order: delivered_date - order_date::date. Only for orders with delivered_date not null. Processing time = shipped_date - order_date::date.",
+    "sql": "AVG(o.delivered_date - o.order_date::date) AS avg_delivery_days"
+  },
+  {
+    "term": "Top-level category vs sub-category",
+    "definition": "categories is a two-level tree. Products link to sub-categories. To report by top-level category (Electronics, Fashion, Books, ...) join categories twice: sub.parent_category_id = top.category_id.",
+    "sql": "JOIN categories sub ON sub.category_id = p.category_id JOIN categories top ON top.category_id = sub.parent_category_id"
+  },
+  {
+    "term": "Best / top rated products",
+    "definition": "Rank by average reviews.rating, but only products with at least 10 reviews so a single 5-star review does not win.",
+    "sql": "GROUP BY p.product_id HAVING COUNT(r.review_id) >= 10 ORDER BY AVG(r.rating) DESC"
+  },
+  {
+    "term": "Cancellation rate / return rate",
+    "definition": "Share of orders with status 'cancelled' (or 'returned') out of all orders in the period, as a percentage.",
+    "sql": "100.0 * COUNT(*) FILTER (WHERE o.status = 'cancelled') / COUNT(*)"
+  },
+  {
+    "term": "Open / in-progress orders",
+    "definition": "Orders that are not finished yet: status in ('pending', 'processing', 'shipped').",
+    "sql": "WHERE o.status IN ('pending', 'processing', 'shipped')"
+  },
+  {
+    "term": "Sales rep performance",
+    "definition": "Orders handled by sales employees are linked by orders.handled_by = employees.employee_id. handled_by is NULL for self-service web orders.",
+    "sql": "JOIN employees e ON e.employee_id = o.handled_by"
+  },
+  {
+    "term": "Region / market",
+    "definition": "Market means the customer's country (customers.country), not the warehouse country. India-specific payment methods: 'upi' and 'cod' (cash on delivery).",
+    "sql": "GROUP BY c.country"
+  },
+  {
+    "term": "Last month / this month / last N days",
+    "definition": "Relative periods use CURRENT_DATE. 'Last month' = the previous full calendar month. 'This year' = calendar year unless the user says fiscal year.",
+    "sql": "o.order_date >= date_trunc('month', CURRENT_DATE) - INTERVAL '1 month' AND o.order_date < date_trunc('month', CURRENT_DATE)"
+  },
+  {
+    "term": "Management chain / reports to",
+    "definition": "employees.manager_id is a self-reference. Use a self-join for direct reports and WITH RECURSIVE for the full chain under someone.",
+    "sql": "JOIN employees m ON m.employee_id = e.manager_id"
+  }
+]

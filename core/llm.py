@@ -1,0 +1,157 @@
+"""Thin wrapper around the Gemini API (google-genai SDK).
+
+Free-tier keys hit 429 (rate limit) and 503 (model busy) often, so every call
+retries with backoff and then falls back to a second model.
+"""
+import json
+import re
+import time
+
+from google import genai
+from google.genai import errors, types
+from pydantic import BaseModel, Field
+
+import config
+
+RETRYABLE = {429, 500, 503, 504}
+
+
+class SQLAnswer(BaseModel):
+    """The structured answer we ask the model to return."""
+    sql: str = Field(description="One PostgreSQL SELECT query, or empty string if unanswerable.")
+    explanation: str = Field(description="1-3 sentences in plain English describing what the query does.")
+    assumptions: list[str] = Field(default_factory=list,
+                                   description="Interpretations made where the question was ambiguous.")
+
+
+class EmptyResultAnswer(BaseModel):
+    """What the model says when a query ran fine but returned no rows."""
+    empty_is_correct: bool = Field(
+        description="True if 'nothing matches' is the genuine answer (e.g. no orders were cancelled "
+                    "yesterday). False if the query is probably too strict or wrong.")
+    message: str = Field(description="1-3 friendly sentences for the user explaining why there are no rows, "
+                                     "citing the data facts (e.g. dates covered, values that exist).")
+    suggested_sql: str = Field(
+        default="", description="If empty_is_correct is false: a corrected or relaxed SELECT that answers "
+                                "the closest sensible question. Otherwise an empty string.")
+    suggestion_label: str = Field(
+        default="", description="Short title for the suggested query, e.g. 'Same question for 2026 instead'.")
+
+
+class LLMError(RuntimeError):
+    pass
+
+
+class Gemini:
+    def __init__(self, api_key: str = config.GEMINI_API_KEY):
+        if not api_key:
+            raise LLMError("GEMINI_API_KEY is missing from .env")
+        self.client = genai.Client(api_key=api_key)
+
+    # ---------------------------------------------------------------- text-to-SQL
+    def generate_sql(self, model: str, system: str, prompt: str,
+                     thinking: str | None = config.DEFAULT_THINKING) -> tuple[SQLAnswer, str]:
+        """Return (answer, model_actually_used)."""
+        return self.structured(model, system, prompt, SQLAnswer, thinking)
+
+    def explain_empty(self, model: str, system: str, prompt: str,
+                      thinking: str | None = config.DEFAULT_THINKING) -> tuple["EmptyResultAnswer", str]:
+        """Diagnose a query that returned no rows (see core/pipeline.py)."""
+        return self.structured(model, system, prompt, EmptyResultAnswer, thinking)
+
+    def structured(self, model: str, system: str, prompt: str, schema: type[BaseModel],
+                   thinking: str | None) -> tuple[BaseModel, str]:
+        """Ask for JSON matching `schema`; retry, then fall back to a second model."""
+        models = [model] + ([config.FALLBACK_MODEL] if model != config.FALLBACK_MODEL else [])
+        last_error = None
+        for m in models:
+            try:
+                return self._call_with_retry(m, system, prompt, schema, thinking), m
+            except errors.APIError as e:
+                last_error = e  # retries exhausted or model unavailable: try the next model
+        raise LLMError(f"All models failed. Last error: {_short(last_error)}")
+
+    def _call_with_retry(self, model: str, system: str, prompt: str, schema: type[BaseModel],
+                         thinking: str | None, tries: int = 3) -> BaseModel:
+        for attempt in range(tries):
+            try:
+                return self._call(model, system, prompt, schema, thinking)
+            except errors.APIError as e:
+                if e.code not in RETRYABLE or attempt == tries - 1:
+                    raise
+                time.sleep(2 * 2 ** attempt)  # 2s, 4s
+        raise AssertionError("unreachable")
+
+    def _call(self, model: str, system: str, prompt: str, schema: type[BaseModel],
+              thinking: str | None) -> BaseModel:
+        if model.startswith("gemma"):
+            # Gemma on the Gemini API has no system instructions or JSON mode.
+            keys = ", ".join(f'"{k}"' for k in schema.model_fields)
+            text = f"{system}\n\n{prompt}\n\nRespond with ONLY a JSON object with keys {keys}."
+            resp = self.client.models.generate_content(model=model, contents=text)
+            return _parse_json(resp.text or "", schema)
+        resp = self.client.models.generate_content(
+            model=model,
+            contents=prompt,
+            config=types.GenerateContentConfig(
+                system_instruction=system,
+                response_mime_type="application/json",
+                response_schema=schema,
+                # Gemini 3+ "thinks" before answering. 'low' was ~3x faster than the
+                # default with the same SQL quality in our tests.
+                thinking_config=(types.ThinkingConfig(thinking_level=thinking)
+                                 if thinking and model.startswith("gemini-3") else None),
+            ),
+        )
+        if isinstance(resp.parsed, schema):
+            return resp.parsed
+        return _parse_json(resp.text or "", schema)
+
+    # ---------------------------------------------------------------- embeddings
+    def embed(self, texts: list[str], task_type: str) -> list[list[float]]:
+        """task_type: RETRIEVAL_DOCUMENT for stored docs, RETRIEVAL_QUERY for questions."""
+        out: list[list[float]] = []
+        for i in range(0, len(texts), 50):
+            batch = texts[i:i + 50]
+            for attempt in range(4):
+                try:
+                    # One Content per text: gemini-embedding-2 is multimodal and
+                    # merges a plain list of strings into ONE embedding.
+                    resp = self.client.models.embed_content(
+                        model=config.EMBED_MODEL,
+                        contents=[types.Content(parts=[types.Part(text=t)]) for t in batch],
+                        config=types.EmbedContentConfig(task_type=task_type,
+                                                        output_dimensionality=config.EMBED_DIM),
+                    )
+                    out.extend(e.values for e in resp.embeddings)
+                    break
+                except errors.APIError as e:
+                    if e.code not in RETRYABLE or attempt == 3:
+                        raise LLMError(f"Embedding failed: {_short(e)}") from e
+                    time.sleep(3 * 2 ** attempt)
+        if len(out) != len(texts):
+            raise LLMError(f"Expected {len(texts)} embeddings, got {len(out)}")
+        return out
+
+
+def _parse_json(text: str, schema: type[BaseModel]) -> BaseModel:
+    """Pull a JSON object out of free text (handles ```json fences)."""
+    match = re.search(r"\{.*\}", text, re.DOTALL)
+    if not match and schema is SQLAnswer:
+        # Model ignored the format: treat a bare SQL reply as the query.
+        sql = re.sub(r"^```(?:sql)?|```$", "", text.strip(), flags=re.MULTILINE).strip()
+        return SQLAnswer(sql=sql, explanation="(model returned SQL without an explanation)")
+    if not match:
+        raise LLMError("Model did not return JSON.")
+    try:
+        return schema.model_validate(json.loads(match.group(0)))
+    except (json.JSONDecodeError, ValueError) as e:
+        raise LLMError(f"Could not parse model output as JSON: {e}") from e
+
+
+def _short(e: Exception | None) -> str:
+    if e is None:
+        return "unknown"
+    if isinstance(e, errors.APIError):
+        return f"{e.code} {e.status}: {(e.message or '')[:200]}"
+    return str(e)[:200]

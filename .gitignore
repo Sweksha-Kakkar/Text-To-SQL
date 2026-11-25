@@ -1,0 +1,12 @@
+# secrets
+.env
+.streamlit/secrets.toml
+
+# python
+.venv/
+__pycache__/
+*.pyc
+
+# keep only the latest evaluation run (shown in the app and README)
+eval/results/*
+!eval/results/latest.json
