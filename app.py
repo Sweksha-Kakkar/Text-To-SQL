@@ -12,6 +12,7 @@ import sqlglot
 import streamlit as st
 
 import config
+from core import datasets, feedback
 from core.pipeline import MODES, AskResult, Pipeline
 
 st.set_page_config(page_title="TableTalk · Text-to-SQL", page_icon="🗄️", layout="wide")
@@ -35,19 +36,30 @@ def get_pipeline() -> Pipeline:
 with st.sidebar:
     st.title("🗄️ TableTalk")
     st.caption("Plain English → PostgreSQL, powered by Gemini + RAG")
-    page = st.radio("Page", ["Ask", "Database", "Evaluation"], label_visibility="collapsed")
+    page = st.radio("Page", ["Ask", "Your data", "Database", "Evaluation"], label_visibility="collapsed")
     st.divider()
+    try:
+        available = {d.name: d for d in datasets.list_datasets()}
+    except psycopg.Error as e:
+        st.error(f"Database connection failed: {e}")
+        st.info("Run `scripts\\start_db.ps1`, then reload this page.")
+        st.stop()
+    dataset = available[st.selectbox("Dataset", list(available), format_func=lambda n: available[n].title)]
     model = st.selectbox("Model", config.SQL_MODELS, help="From the Google AI Studio catalogue. "
                          f"Falls back to {config.FALLBACK_MODEL} if the model is busy or rate-limited.")
     thinking = st.select_slider("Thinking level", config.THINKING_LEVELS, value=config.DEFAULT_THINKING,
                                 help="How long Gemini 3 models reason before answering. Higher = slower.")
-    mode = st.radio("Context", list(MODES), format_func=lambda m: MODES[m],
-                    help="What the model sees. Compare them on the Evaluation page.")
+    mode = "rag"
+    if dataset.builtin:
+        mode = st.radio("Context", list(MODES), format_func=lambda m: MODES[m],
+                        help="What the model sees. Compare them on the Evaluation page.")
+    # one chat per dataset, so follow-ups never refer to another dataset's tables
+    chat = st.session_state.setdefault("chats", {}).setdefault(dataset.name, [])  # list[AskResult]
+    explain = st.toggle("Explain results in easy words", value=True,
+                        help=f"Sends up to {config.EXPLAIN_ROWS} rows of each result to Gemini.")
     if st.button("Clear chat", width="stretch"):
-        st.session_state.history = []
+        chat.clear()
         st.rerun()
-
-st.session_state.setdefault("history", [])  # list[AskResult]
 
 
 # ---------------------------------------------------------------------------- helpers
@@ -102,17 +114,43 @@ def show_table(df: pd.DataFrame, truncated: bool, seconds: float | None, key: st
     st.download_button("Download CSV", df.to_csv(index=False), "result.csv", "text/csv", key=key)
 
 
+def rate(r: AskResult) -> None:
+    """Thumbs up saves this answer as an example for similar questions."""
+    choice = st.feedback("thumbs", key=f"fb-{id(r)}")  # 0 = down, 1 = up
+    if choice is None:
+        return
+    if choice != getattr(r, "saved_rating", None):
+        try:
+            feedback.save(r.dataset, r.retrieval_query, r.sql, bool(choice), get_pipeline().llm)
+        except Exception as e:  # noqa: BLE001 - a failed rating must not break the page
+            st.error(f"Could not save your rating: {e}")
+            return
+        r.saved_rating = choice
+    st.caption("Saved. Similar questions will learn from this." if choice
+               else "Noted. This answer will not be reused.")
+
+
 def render_result(r: AskResult) -> None:
+    if r.clarification:
+        st.info(f"🤔 {r.clarification}")
+        return
     if r.explanation:
         st.markdown(r.explanation)
     if r.assumptions:
         st.caption("Assumptions: " + "; ".join(r.assumptions))
+    if not r.ok and r.explanation and not r.sql:
+        st.info("I could not answer this from the selected dataset. Check the **Dataset** box on the left.")
+        return
     if not r.ok:
         st.error(r.error)
         if r.sql:
             show_sql(r.sql)
         return
 
+    if r.summary:
+        with st.container(border=True):
+            st.markdown("**💬 In simple words**")
+            st.text(r.summary)  # plain text: "$" in amounts must not be read as maths
     show_sql(r.sql)
     if r.df.empty:
         note = r.empty_note or "No rows matched this query."
@@ -127,9 +165,14 @@ def render_result(r: AskResult) -> None:
             show_table(a.df, a.truncated, None, key=f"dl-alt-{id(r)}")
     else:
         show_table(r.df, r.truncated, r.total_seconds, key=f"dl-{id(r)}")
+        rate(r)
 
     with st.expander("🔎 Retrieved context (RAG)"):
-        if r.retrieved is None:
+        for q, _, score in r.learned:
+            st.markdown(f"**Used an answer you liked** · `{score:.2f}` {q}")
+        if r.dataset != "store":
+            st.info("Uploaded data: the model saw all its tables and your business rules.")
+        elif r.retrieved is None:
             st.info("Baseline mode: the model saw the full schema and nothing else.")
         else:
             rv = r.retrieved
@@ -165,33 +208,111 @@ def page_ask() -> None:
                 "`python -m db.setup_db` and `python -m rag.build_index`.")
         st.stop()
 
-    pending = None
-    if not st.session_state.history:
+    pending = st.session_state.pop("pending", None)  # (question, may_ask_back)
+    if not chat and dataset.builtin:
         st.write("Try one of these, or type your own question below. Follow-ups like "
                  "*'now only for India'* work too.")
         cols = st.columns(3)
         for i, q in enumerate(EXAMPLE_QUESTIONS):
             if cols[i % 3].button(q, width="stretch", key=f"ex{i}"):
-                pending = q
+                pending = (q, True)
+    elif not chat:
+        st.write(f"Ask anything about **{dataset.title}**. Tables: {', '.join(dataset.tables)}.")
 
-    for r in st.session_state.history:
+    typed = st.chat_input(f"Ask about {dataset.title}…")
+    if typed:
+        pending = (typed, True)
+
+    for i, r in enumerate(chat):
         st.chat_message("user").write(r.question)
         with st.chat_message("assistant"):
             render_result(r)
+            # only the newest question can still be answered with a click
+            if r.clarification and i == len(chat) - 1 and not pending:
+                for n, option in enumerate(r.options):
+                    if st.button(option, key=f"opt-{id(r)}-{n}"):
+                        st.session_state.pending = (f"{r.question} ({option})", False)
+                        st.rerun()
+                st.caption("Pick one, or type your question again with more detail.")
 
-    question = st.chat_input("Ask about customers, orders, products, stock, staff…") or pending
-    if question:
+    if pending:
+        question, may_ask_back = pending
         st.chat_message("user").write(question)
-        history = [(r.question, r.sql) for r in st.session_state.history if r.ok]
+        history = [(r.question, r.sql) for r in chat if r.ok]
         with st.chat_message("assistant"):
             with st.spinner("Retrieving context and writing SQL…"):
-                result = pipeline.ask(question, model=model, mode=mode, history=history, thinking=thinking)
-            render_result(result)
-        st.session_state.history.append(result)
+                result = pipeline.ask(question, model=model, mode=mode, history=history, thinking=thinking,
+                                      dataset=dataset, allow_clarify=may_ask_back,
+                                      explain_result=explain)
+        chat.append(result)
+        st.rerun()  # draw it once, from the history, so its buttons keep working
+
+
+@st.cache_data(show_spinner="Reading files…")
+def parse_files(files: list[tuple[str, bytes]]) -> dict[str, pd.DataFrame]:
+    return datasets.read_files(files)
+
+
+def page_data() -> None:
+    st.header("Your data")
+    st.write("Upload CSV or Excel files, then pick the dataset in the sidebar and ask questions.")
+    st.warning("Your questions, table names, column names, some column values and your rules are sent to "
+               "Google's Gemini. With 'Explain results' on, result rows are sent too. Leave out private columns, and do not upload confidential data.")
+    for note in st.session_state.pop("upload_notes", []):
+        st.info(note)
+
+    uploads = st.file_uploader("Files (one table per CSV or Excel sheet)", type=["csv", "tsv", "xlsx"],
+                               accept_multiple_files=True)
+    if uploads:
+        try:
+            frames = parse_files([(u.name, u.getvalue()) for u in uploads])
+        except Exception as e:  # noqa: BLE001 - bad files are shown, not crashed on
+            st.error(f"Could not read the files: {e}")
+            frames = {}
+        drop = {}
+        for table, df in frames.items():
+            st.markdown(f"**{table}** · {len(df):,} rows · {df.shape[1]} columns")
+            st.dataframe(df.head(5), hide_index=True)
+            drop[table] = st.multiselect(f"Columns to leave out of {table}", list(df.columns),
+                                         default=datasets.sensitive_columns(df.columns), key=f"drop-{table}")
+        if frames:
+            title = st.text_input("Name this dataset")
+            rules = st.text_area("Business rules (optional, one per line)",
+                                 placeholder="Revenue = quantity * price, not counting cancelled orders")
+            if st.button("Create dataset", type="primary"):
+                try:
+                    with st.spinner("Loading into PostgreSQL…"):
+                        created, notes = datasets.create_dataset(title, frames, rules, drop)
+                except Exception as e:  # noqa: BLE001
+                    st.error(f"Could not create the dataset: {e}")
+                else:
+                    st.session_state.upload_notes = [
+                        f"Created **{created.title}**. Choose it in the sidebar to ask questions."] + notes
+                    st.rerun()
+
+    own = [d for d in available.values() if not d.builtin]
+    if own:
+        st.subheader("Uploaded datasets")
+    for d in own:
+        with st.expander(f"{d.title} · {len(d.tables)} table{'s' if len(d.tables) != 1 else ''}"):
+            rules = st.text_area("Business rules", d.rules, key=f"rules-{d.name}")
+            if st.button("Save rules", key=f"save-{d.name}"):
+                datasets.save_rules(d.name, rules)
+                st.success("Saved.")
+            sure = st.checkbox("Yes, delete this dataset and its ratings", key=f"sure-{d.name}")
+            if st.button("Delete", key=f"del-{d.name}", disabled=not sure):
+                datasets.delete_dataset(d.name)
+                st.session_state.chats.pop(d.name, None)
+                st.rerun()
 
 
 def page_database() -> None:
     st.header("The database")
+    if not dataset.builtin:
+        st.write(f"**{dataset.title}**: your uploaded data. The model only ever gets **read-only** access.")
+        for text in dataset.schema_text.values():
+            st.code(text, language="text")
+        return
     st.write("A fictional online store with 10 tables, generated by `db/seed.py` (fixed random seed). "
              "The model only ever gets **read-only** access.")
     try:
@@ -274,12 +395,13 @@ def page_evaluation() -> None:
         st.subheader("Failures")
         for r in failed.itertuples():
             with st.expander(f"#{r.id} · {r.setup} · {r.question}"):
-                if r.error:
+                if isinstance(r.error, str):  # missing values load as NaN, which is truthy
                     st.error(r.error)
                 st.code(r.sql or "(no SQL)", language="sql")
 
 
 try:
-    {"Ask": page_ask, "Database": page_database, "Evaluation": page_evaluation}[page]()
+    {"Ask": page_ask, "Your data": page_data, "Database": page_database,
+     "Evaluation": page_evaluation}[page]()
 except psycopg.OperationalError as e:
     st.error(f"Database connection failed: {e}")

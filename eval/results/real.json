@@ -1,0 +1,249 @@
+{
+  "run_at": "2026-11-28T20:28:08",
+  "summary": {
+    "with rules": "12/12",
+    "without rules": "8/12"
+  },
+  "rows": [
+    {
+      "id": 1,
+      "dataset": "ipl",
+      "question": "How many matches are in the data?",
+      "setup": "with rules",
+      "correct": true,
+      "sql": "SELECT COUNT(DISTINCT match_id) AS total_matches FROM deliveries",
+      "error": null,
+      "model_used": "gemini-3.5-flash-lite"
+    },
+    {
+      "id": 2,
+      "dataset": "ipl",
+      "question": "Who are the top 5 run scorers of all time?",
+      "setup": "with rules",
+      "correct": true,
+      "sql": "SELECT d.striker AS batter, SUM(d.runs_off_bat) AS total_runs FROM deliveries d WHERE d.innings <= 2 GROUP BY d.striker ORDER BY total_runs DESC LIMIT 5",
+      "error": null,
+      "model_used": "gemini-3.5-flash-lite"
+    },
+    {
+      "id": 3,
+      "dataset": "ipl",
+      "question": "Which 5 bowlers have taken the most wickets?",
+      "setup": "with rules",
+      "correct": true,
+      "sql": "SELECT bowler, COUNT(*) AS total_wickets FROM deliveries WHERE wicket_type IN ('bowled', 'caught', 'caught and bowled', 'lbw', 'stumped', 'hit wicket') AND innings <= 2 GROUP BY bowler ORDER BY total_wickets DESC LIMIT 5",
+      "error": null,
+      "model_used": "gemini-3.5-flash-lite"
+    },
+    {
+      "id": 4,
+      "dataset": "ipl",
+      "question": "Which batter has hit the most sixes?",
+      "setup": "with rules",
+      "correct": true,
+      "sql": "SELECT d.striker AS batter, COUNT(*) AS total_sixes FROM deliveries AS d WHERE d.runs_off_bat = 6 AND d.innings <= 2 GROUP BY d.striker ORDER BY total_sixes DESC LIMIT 1",
+      "error": null,
+      "model_used": "gemini-3.5-flash-lite"
+    },
+    {
+      "id": 5,
+      "dataset": "ipl",
+      "question": "What is the highest team total in a single innings?",
+      "setup": "with rules",
+      "correct": true,
+      "sql": "SELECT d.match_id, d.season, d.batting_team, d.innings, SUM(d.runs_off_bat + d.extras) AS team_total FROM deliveries d WHERE d.innings <= 2 GROUP BY d.match_id, d.season, d.batting_team, d.innings ORDER BY team_total DESC LIMIT 1",
+      "error": null,
+      "model_used": "gemini-3.5-flash-lite"
+    },
+    {
+      "id": 6,
+      "dataset": "ipl",
+      "question": "How many matches were played in each season?",
+      "setup": "with rules",
+      "correct": true,
+      "sql": "SELECT season, COUNT(DISTINCT match_id) AS matches_played FROM deliveries GROUP BY season ORDER BY season",
+      "error": null,
+      "model_used": "gemini-3.5-flash-lite"
+    },
+    {
+      "id": 7,
+      "dataset": "online_retail",
+      "question": "What is the total revenue?",
+      "setup": "with rules",
+      "correct": true,
+      "sql": "SELECT ROUND(SUM(quantity * unit_price), 2) AS total_revenue FROM sales WHERE invoice_no NOT LIKE 'C%' AND quantity > 0 AND unit_price > 0",
+      "error": null,
+      "model_used": "gemini-3.5-flash-lite"
+    },
+    {
+      "id": 8,
+      "dataset": "online_retail",
+      "question": "Which 5 countries bring the most revenue?",
+      "setup": "with rules",
+      "correct": true,
+      "sql": "SELECT country, ROUND(SUM(quantity * unit_price), 2) AS revenue FROM sales WHERE invoice_no NOT LIKE 'C%' AND quantity > 0 AND unit_price > 0 GROUP BY country ORDER BY revenue DESC LIMIT 5",
+      "error": null,
+      "model_used": "gemini-3.5-flash-lite"
+    },
+    {
+      "id": 9,
+      "dataset": "online_retail",
+      "question": "How many orders were placed in each month of 2011?",
+      "setup": "with rules",
+      "correct": true,
+      "sql": "SELECT TO_CHAR(invoice_date, 'YYYY-MM') AS order_month, COUNT(DISTINCT invoice_no) AS total_orders FROM sales WHERE invoice_no NOT LIKE 'C%' AND invoice_date >= '2011-01-01' AND invoice_date < '2012-01-01' GROUP BY TO_CHAR(invoice_date, 'YYYY-MM') ORDER BY order_month",
+      "error": null,
+      "model_used": "gemini-3.5-flash-lite"
+    },
+    {
+      "id": 10,
+      "dataset": "online_retail",
+      "question": "Who are the top 5 customers by revenue?",
+      "setup": "with rules",
+      "correct": true,
+      "sql": "SELECT customer_id, ROUND(SUM(quantity * unit_price), 2) AS total_revenue FROM sales WHERE invoice_no NOT LIKE 'C%' AND quantity > 0 AND unit_price > 0 AND customer_id IS NOT NULL GROUP BY customer_id ORDER BY total_revenue DESC LIMIT 5",
+      "error": null,
+      "model_used": "gemini-3.5-flash-lite"
+    },
+    {
+      "id": 11,
+      "dataset": "online_retail",
+      "question": "How many cancelled invoices are there?",
+      "setup": "with rules",
+      "correct": true,
+      "sql": "SELECT COUNT(DISTINCT invoice_no) AS cancelled_invoices_count FROM sales WHERE invoice_no LIKE 'C%'",
+      "error": null,
+      "model_used": "gemini-3.5-flash-lite"
+    },
+    {
+      "id": 12,
+      "dataset": "online_retail",
+      "question": "How many different customers are from France?",
+      "setup": "with rules",
+      "correct": true,
+      "sql": "SELECT count(DISTINCT customer_id) AS france_customer_count FROM sales WHERE country = 'France' AND customer_id IS NOT NULL",
+      "error": null,
+      "model_used": "gemini-3.5-flash-lite"
+    },
+    {
+      "id": 1,
+      "dataset": "ipl",
+      "question": "How many matches are in the data?",
+      "setup": "without rules",
+      "correct": true,
+      "sql": "SELECT COUNT(DISTINCT match_id) AS match_count FROM deliveries",
+      "error": null,
+      "model_used": "gemini-3.5-flash-lite"
+    },
+    {
+      "id": 2,
+      "dataset": "ipl",
+      "question": "Who are the top 5 run scorers of all time?",
+      "setup": "without rules",
+      "correct": false,
+      "sql": "SELECT d.striker AS batsman_name, SUM(d.runs_off_bat) AS total_runs FROM deliveries d GROUP BY d.striker ORDER BY total_runs DESC LIMIT 5",
+      "error": null,
+      "model_used": "gemini-3.5-flash-lite"
+    },
+    {
+      "id": 3,
+      "dataset": "ipl",
+      "question": "Which 5 bowlers have taken the most wickets?",
+      "setup": "without rules",
+      "correct": false,
+      "sql": "SELECT bowler, COUNT(*) AS total_wickets FROM deliveries WHERE wicket_type IS NOT NULL AND wicket_type != 'retired hurt' GROUP BY bowler ORDER BY total_wickets DESC LIMIT 5",
+      "error": null,
+      "model_used": "gemini-3.5-flash-lite"
+    },
+    {
+      "id": 4,
+      "dataset": "ipl",
+      "question": "Which batter has hit the most sixes?",
+      "setup": "without rules",
+      "correct": false,
+      "sql": "SELECT d.striker AS batter, COUNT(*) AS total_sixes FROM deliveries d WHERE d.runs_off_bat = 6 GROUP BY d.striker ORDER BY total_sixes DESC LIMIT 1",
+      "error": null,
+      "model_used": "gemini-3.5-flash-lite"
+    },
+    {
+      "id": 5,
+      "dataset": "ipl",
+      "question": "What is the highest team total in a single innings?",
+      "setup": "without rules",
+      "correct": true,
+      "sql": "SELECT batting_team, match_id, innings, SUM(runs_off_bat + extras) AS total_runs FROM deliveries GROUP BY batting_team, match_id, innings ORDER BY total_runs DESC LIMIT 1",
+      "error": null,
+      "model_used": "gemini-3.5-flash-lite"
+    },
+    {
+      "id": 6,
+      "dataset": "ipl",
+      "question": "How many matches were played in each season?",
+      "setup": "without rules",
+      "correct": true,
+      "sql": "SELECT season, COUNT(DISTINCT match_id) AS match_count FROM deliveries GROUP BY season ORDER BY season",
+      "error": null,
+      "model_used": "gemini-3.5-flash-lite"
+    },
+    {
+      "id": 7,
+      "dataset": "online_retail",
+      "question": "What is the total revenue?",
+      "setup": "without rules",
+      "correct": true,
+      "sql": "SELECT ROUND(SUM(quantity * unit_price), 2) AS total_revenue FROM sales WHERE quantity > 0 AND unit_price > 0",
+      "error": null,
+      "model_used": "gemini-3.5-flash-lite"
+    },
+    {
+      "id": 8,
+      "dataset": "online_retail",
+      "question": "Which 5 countries bring the most revenue?",
+      "setup": "without rules",
+      "correct": true,
+      "sql": "SELECT country, ROUND(SUM(quantity * unit_price), 2) AS total_revenue FROM sales WHERE quantity > 0 AND unit_price > 0 GROUP BY country ORDER BY total_revenue DESC LIMIT 5",
+      "error": null,
+      "model_used": "gemini-3.5-flash-lite"
+    },
+    {
+      "id": 9,
+      "dataset": "online_retail",
+      "question": "How many orders were placed in each month of 2011?",
+      "setup": "without rules",
+      "correct": false,
+      "sql": "SELECT TO_CHAR(invoice_date, 'YYYY-MM') AS month, COUNT(DISTINCT invoice_no) AS order_count FROM sales WHERE invoice_date >= '2011-01-01' AND invoice_date < '2012-01-01' GROUP BY TO_CHAR(invoice_date, 'YYYY-MM') ORDER BY month",
+      "error": null,
+      "model_used": "gemini-3.5-flash-lite"
+    },
+    {
+      "id": 10,
+      "dataset": "online_retail",
+      "question": "Who are the top 5 customers by revenue?",
+      "setup": "without rules",
+      "correct": true,
+      "sql": "SELECT customer_id, ROUND(SUM(quantity * unit_price), 2) AS revenue FROM sales WHERE customer_id IS NOT NULL AND quantity > 0 AND unit_price > 0 GROUP BY customer_id ORDER BY revenue DESC LIMIT 5",
+      "error": null,
+      "model_used": "gemini-3.5-flash-lite"
+    },
+    {
+      "id": 11,
+      "dataset": "online_retail",
+      "question": "How many cancelled invoices are there?",
+      "setup": "without rules",
+      "correct": true,
+      "sql": "SELECT COUNT(DISTINCT invoice_no) AS cancelled_invoices_count FROM sales WHERE invoice_no LIKE 'C%'",
+      "error": null,
+      "model_used": "gemini-3.5-flash-lite"
+    },
+    {
+      "id": 12,
+      "dataset": "online_retail",
+      "question": "How many different customers are from France?",
+      "setup": "without rules",
+      "correct": true,
+      "sql": "SELECT COUNT(DISTINCT customer_id) AS unique_customers_france FROM sales WHERE country = 'France'",
+      "error": null,
+      "model_used": "gemini-3.5-flash-lite"
+    }
+  ]
+}

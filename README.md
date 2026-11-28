@@ -22,6 +22,26 @@ To ask the database a question, you must write in a language called **SQL**. Man
 
 **TableTalk lets you ask in normal English.** It works like a **translator** between a person and a database.
 
+## ✨ What you can do
+
+| Feature | What it means |
+|---|---|
+| **Answers in easy words** | Each result comes with a short plain-English explanation |
+| **Upload your own data** | Add CSV or Excel files and ask questions about them |
+| **Ask back** | If your question is unclear, it can ask what you meant instead of guessing |
+| **Thumbs up / down** | A liked answer is reused as an example for similar questions |
+| **Write your own rules** | Tell it what words like *revenue* mean for your data |
+| **Demo store** | A ready-made example to try without uploading anything |
+
+### Uploading data
+
+1. Open **Your data** and choose your files.
+2. Check the columns. Ones that look private (email, phone, address) are suggested to be **left out**.
+3. Give it a name, add rules if you like, and click **Create dataset**.
+4. Pick it under **Dataset** in the sidebar and ask.
+
+> **Privacy:** your questions, table and column names, some column values and your rules are sent to Google's Gemini. With **Explain results** on (the default), up to 30 rows of each result are sent too. Do not upload confidential data.
+
 ## 🧩 The main parts
 
 | Part | What it is | In easy words |
@@ -32,7 +52,7 @@ To ask the database a question, you must write in a language called **SQL**. Man
 | **Streamlit** | A tool for making web pages in Python | The screen you see and type on |
 | **RAG** | Giving the AI helpful notes before it answers | An open-book exam |
 
-## 🗃️ The data
+## 🗃️ The demo data
 
 It is a **made-up online store**, so no real people are in it. It has **10 tables**:
 
@@ -122,7 +142,7 @@ flowchart TD
 5. **The database runs it.**
 6. **If there is an error, the AI tries to fix it.** It gets 2 more chances.
 7. **If nothing is found, it explains why** instead of showing a blank screen.
-8. **You see the answer:** the SQL, a table, a chart and a download button.
+8. **You see the answer:** a short explanation in easy words, the SQL, a table, a chart and a download button.
 
 ### Example of an empty result
 
@@ -136,7 +156,7 @@ What if the AI writes *"delete all customers"*?
 
 | Lock | How it protects the data |
 |---|---|
-| **1. Code check** | The query is rejected unless it is a single read-only `SELECT` on the store tables |
+| **1. Code check** | The query is rejected unless it is a single read-only `SELECT` on the chosen dataset's tables |
 | **2. Limited user** | The database user that runs the query only has permission to **read** |
 | **3. Timer** | Any query running longer than **8 seconds** is stopped |
 
@@ -163,15 +183,42 @@ There is an exam of **25 questions**, each with a correct query written by hand.
 
 **So the notes made a big difference.**
 
+### Tested on real public data
+
+| Dataset | What it is | Rows |
+|---|---|---:|
+| [**IPL**](https://cricsheet.org) | Every ball bowled (Cricsheet) | 295,732 |
+| [**Online retail**](https://archive.ics.uci.edu/dataset/352) | Sales of a UK online shop (UCI, CC BY 4.0) | 541,909 |
+
+**12 questions**, 6 on each dataset:
+
+| What the AI is given | IPL | Online retail | Total |
+|---|---:|---:|---:|
+| Table details only | 3/6 | 5/6 | **8/12** |
+| Table details + written rules | 6/6 | 6/6 | **12/12** |
+
+**Why rules matter:** without them, the AI counted run outs as the bowler's wickets, included super overs in career totals, and counted cancelled invoices as orders.
+
+To try it yourself:
+
+```bash
+python -m scripts.load_real_data    # downloads and loads both datasets
+python -m eval.run_real_eval        # scores them
+```
+
 > **Please note**
 > - This is a small exam on made-up data, and the rules and questions were written for the same project. It does **not** mean 96% accuracy on any real database.
-> - The run (25 Nov 2026) was answered by the smaller model `gemini-3.5-flash-lite`, because the free daily limit of the main model had run out.
+> - The demo store run (25 Nov 2026) and the real data run (28 Nov 2026) were both answered by the smaller model `gemini-3.5-flash-lite`.
+> - The real data questions and rules were also written by the same person. An earlier run with rules scored 11/12, so answers can vary between runs.
 
 ## 📁 Which file does what
 
 | File or folder | Job |
 |---|---|
-| [`app.py`](app.py) | The screen: Ask, Database and Evaluation pages |
+| [`app.py`](app.py) | The screen: Ask, Your data, Database and Evaluation pages |
+| [`core/datasets.py`](core/datasets.py) | Handles uploaded files |
+| [`core/feedback.py`](core/feedback.py) | Saves thumbs up and down |
+| [`scripts/load_real_data.py`](scripts/load_real_data.py) | Loads the two public datasets |
 | [`config.py`](config.py) | Settings, like model names and limits |
 | [`core/pipeline.py`](core/pipeline.py) | The manager that runs the steps in order (**start reading here**) |
 | [`core/llm.py`](core/llm.py) | Talks to Gemini |
@@ -229,5 +276,5 @@ Download the *binaries* zip from EnterpriseDB, extract it to `%LOCALAPPDATA%\Pro
 
 - [ ] Fine-tune a small open model (Gemma) and compare it with Gemini on the same exam
 - [ ] Move the note search into PostgreSQL using **pgvector**
-- [ ] Ask the user to clarify when a question is unclear
+- [ ] A better-looking user interface
 - [ ] Put the app online

@@ -10,3 +10,7 @@ __pycache__/
 # keep only the latest evaluation run (shown in the app and README)
 eval/results/*
 !eval/results/latest.json
+!eval/results/real.json
+
+# downloaded public datasets
+data/

@@ -66,6 +66,8 @@ def main() -> None:
         # RAG index lives in its own schema, owned by the app role, invisible to the reader.
         cur.execute(sql.SQL("CREATE SCHEMA IF NOT EXISTS rag AUTHORIZATION {}").format(app))
         cur.execute(sql.SQL("REVOKE ALL ON SCHEMA rag FROM PUBLIC"))
+        # Uploaded datasets: the app role creates one schema (ds_<name>) per upload.
+        cur.execute(sql.SQL("GRANT CREATE ON DATABASE {} TO {}").format(db, app))
         conn.commit()
 
     with psycopg.connect(**config.pg_params("super"), autocommit=True) as conn:

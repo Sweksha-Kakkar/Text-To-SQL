@@ -26,7 +26,7 @@ class UnsafeSQL(ValueError):
     pass
 
 
-def check_sql(sql: str, allowed_tables=config.STORE_TABLES) -> str:
+def check_sql(sql: str, allowed_tables=config.STORE_TABLES, schema: str = "public") -> str:
     """Return the cleaned SQL if it is a single safe SELECT, else raise UnsafeSQL."""
     sql = (sql or "").strip().rstrip(";").strip()
     if not sql:
@@ -55,7 +55,7 @@ def check_sql(sql: str, allowed_tables=config.STORE_TABLES) -> str:
         name = table.name.lower()
         if not name:  # e.g. FROM generate_series(...)
             continue
-        if table.db and table.db.lower() != "public":
+        if table.catalog or (table.db and table.db.lower() != schema):
             raise UnsafeSQL(f"Schema not allowed: {table.db}.")
         if name not in allowed and name not in cte_names:
             raise UnsafeSQL(f"Unknown or forbidden table: {name}.")

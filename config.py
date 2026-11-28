@@ -26,6 +26,8 @@ DEFAULT_MODEL = SQL_MODELS[0]
 FALLBACK_MODEL = "gemini-3.5-flash-lite"
 THINKING_LEVELS = ["minimal", "low", "medium", "high"]
 DEFAULT_THINKING = "low"
+LLM_TIMEOUT_MS = 30_000     # give up on a Gemini call that does not reply
+QUOTA_COOLDOWN_S = 600      # after a 429, skip that model for this long
 EMBED_MODEL = "gemini-embedding-2"
 EMBED_DIM = 768  # smaller vectors than the 3072 default: faster, plenty for ~70 docs
 
@@ -46,6 +48,9 @@ MAX_ROWS = 1000             # rows returned to the UI
 STATEMENT_TIMEOUT_MS = 8000  # kill slow generated queries
 MAX_FIX_ATTEMPTS = 2        # self-correction retries after a SQL error
 HISTORY_TURNS = 3           # previous Q&A pairs sent for follow-up questions
+
+MAX_UPLOAD_ROWS = 1_000_000  # per table
+EXPLAIN_ROWS = 30            # result rows sent to the model to be explained
 
 STORE_TABLES = [
     "customers", "categories", "suppliers", "products", "warehouses",

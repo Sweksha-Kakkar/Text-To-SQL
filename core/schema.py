@@ -57,17 +57,18 @@ class Table:
 
 COLUMNS_SQL = """
 SELECT c.table_name, c.column_name, c.data_type, c.is_nullable = 'YES',
-       col_description(format('public.%%I', c.table_name)::regclass, c.ordinal_position)
+       col_description(format('%%I.%%I', c.table_schema, c.table_name)::regclass, c.ordinal_position)
 FROM information_schema.columns c
-WHERE c.table_schema = 'public' AND c.table_name = ANY(%s)
+WHERE c.table_schema = %s AND c.table_name = ANY(%s)
 ORDER BY c.table_name, c.ordinal_position
 """
 # pg_catalog instead of information_schema: the latter hides FK targets from non-owners.
 KEYS_SQL = """
-SELECT con.conrelid::regclass::text, con.contype, a.attname,
-       con.confrelid::regclass::text, af.attname
+SELECT cl.relname, con.contype, a.attname, ref.relname, af.attname
 FROM pg_constraint con
-JOIN pg_namespace n ON n.oid = con.connamespace AND n.nspname = 'public'
+JOIN pg_namespace n ON n.oid = con.connamespace AND n.nspname = %s
+JOIN pg_class cl ON cl.oid = con.conrelid
+LEFT JOIN pg_class ref ON ref.oid = con.confrelid
 CROSS JOIN LATERAL unnest(con.conkey) WITH ORDINALITY AS k(attnum, ord)
 JOIN pg_attribute a ON a.attrelid = con.conrelid AND a.attnum = k.attnum
 LEFT JOIN pg_attribute af ON con.contype = 'f' AND af.attrelid = con.confrelid
@@ -76,22 +77,24 @@ WHERE con.contype IN ('p', 'f')
 """
 
 
-def load_schema(conn: psycopg.Connection, tables=config.STORE_TABLES) -> dict[str, Table]:
+def load_schema(conn: psycopg.Connection, tables=config.STORE_TABLES,
+                schema: str = "public") -> dict[str, Table]:
     cur = conn.cursor()
     result: dict[str, Table] = {}
     for t in tables:
-        cur.execute("SELECT obj_description(format('public.%%I', %s::text)::regclass, 'pg_class')", (t,))
+        cur.execute("SELECT obj_description(format('%%I.%%I', %s::text, %s::text)::regclass, 'pg_class')",
+                    (schema, t))
         comment = cur.fetchone()[0]
-        cur.execute(sql.SQL("SELECT count(*) FROM {}").format(sql.Identifier(t)))
+        cur.execute(sql.SQL("SELECT count(*) FROM {}").format(sql.Identifier(schema, t)))
         result[t] = Table(t, comment, cur.fetchone()[0])
 
-    cur.execute(COLUMNS_SQL, (list(tables),))
+    cur.execute(COLUMNS_SQL, (schema, list(tables)))
     for table, col, dtype, nullable, comment in cur.fetchall():
         dtype = {"character varying": "varchar", "timestamp without time zone": "timestamp",
                  "double precision": "float"}.get(dtype, dtype)
         result[table].columns.append(Column(col, dtype, nullable, comment))
 
-    cur.execute(KEYS_SQL)
+    cur.execute(KEYS_SQL, (schema,))
     for table, kind, col, ref_table, ref_col in cur.fetchall():
         if table not in result:
             continue
@@ -108,9 +111,10 @@ def load_schema(conn: psycopg.Connection, tables=config.STORE_TABLES) -> dict[st
             if c.data_type != "varchar" or c.pk:
                 continue
             cur.execute(sql.SQL("SELECT DISTINCT {c} FROM {t} WHERE {c} IS NOT NULL ORDER BY 1 LIMIT {n}")
-                        .format(c=sql.Identifier(c.name), t=sql.Identifier(t.name),
+                        .format(c=sql.Identifier(c.name), t=sql.Identifier(schema, t.name),
                                 n=sql.Literal(VALUE_HINT_MAX + 1)))
             values = [r[0] for r in cur.fetchall()]
-            if len(values) <= VALUE_HINT_MAX:
+            # Long free text is not a category and would only bloat the prompt.
+            if len(values) <= VALUE_HINT_MAX and all(len(v) <= 60 for v in values):
                 c.values = values
     return result

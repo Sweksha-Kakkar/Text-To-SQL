@@ -3,6 +3,7 @@ from dataclasses import dataclass
 
 import pandas as pd
 import psycopg
+from psycopg import sql as pgsql
 
 import config
 
@@ -13,7 +14,7 @@ class QueryResult:
     truncated: bool  # True if more than MAX_ROWS rows existed
 
 
-def run_query(sql: str, max_rows: int = config.MAX_ROWS) -> QueryResult:
+def run_query(sql: str, max_rows: int = config.MAX_ROWS, schema: str = "public") -> QueryResult:
     """Execute as tabletalk_reader inside a read-only transaction with a timeout.
 
     Raises psycopg.Error on SQL errors; the pipeline feeds that message back
@@ -23,6 +24,7 @@ def run_query(sql: str, max_rows: int = config.MAX_ROWS) -> QueryResult:
         conn.read_only = True
         with conn.cursor() as cur:
             cur.execute(f"SET LOCAL statement_timeout = {int(config.STATEMENT_TIMEOUT_MS)}")
+            cur.execute(pgsql.SQL("SET LOCAL search_path TO {}").format(pgsql.Identifier(schema)))
             cur.execute(sql)
             if cur.description is None:
                 return QueryResult(pd.DataFrame(), False)

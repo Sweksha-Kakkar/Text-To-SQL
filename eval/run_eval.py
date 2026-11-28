@@ -43,14 +43,14 @@ def main() -> None:
         for mode in args.modes:
             print(f"\n=== {model} | {mode} | thinking={args.thinking} ===")
             for t in tests:
-                r = pipeline.ask(t["question"], model=model, mode=mode, thinking=args.thinking, handle_empty=False)
+                r = pipeline.ask(t["question"], model=model, mode=mode, thinking=args.thinking, handle_empty=False, use_feedback=False)
                 # Free-tier overload (503/429 on every model) is not a wrong answer: wait, retry.
                 for wait in (30, 60):
                     if not (r.error and r.error.startswith("All models failed")):
                         break
                     print(f"  ...Gemini unavailable, retrying in {wait}s")
                     time.sleep(wait)
-                    r = pipeline.ask(t["question"], model=model, mode=mode, thinking=args.thinking, handle_empty=False)
+                    r = pipeline.ask(t["question"], model=model, mode=mode, thinking=args.thinking, handle_empty=False, use_feedback=False)
                 correct = r.ok and results_match(gold[t["id"]], r.df, t.get("match", "all"))
                 rows.append({
                     "id": t["id"], "difficulty": t["difficulty"], "question": t["question"],
